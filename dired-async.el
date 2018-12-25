@@ -89,12 +89,53 @@ Should take same args as `message'."
   "Face used for `dired-async--modeline-mode' lighter."
   :group 'dired-async)
 
+(defvar dired-async-progress-file "/tmp/dired-async-progress.log")
+(defvar dired-async-job-start-time nil)
+(defvar dired-async-total-size-to-transfer nil)
+(defvar dired-async-report-timer nil)
+(defvar dired-async--progress 0)
+(defun dired-async-progress ()
+  (let (start-time file speed)
+    (with-temp-buffer
+      (insert-file-contents dired-async-progress-file)
+      (save-excursion
+        (when (re-search-forward "\\(Itime: \\)\\(.*\\)$" nil t)
+          (setq start-time (match-string 2))))
+      (when (re-search-forward "\\(Fname: \\)\\(.*\\)$" nil t)
+        (setq file (match-string 2))))
+    (when (and file start-time)
+      (let ((transfered-size (nth 7 (file-attributes file))))
+        (setq speed (/ transfered-size
+                       (- (float-time)
+                          (string-to-number start-time))))
+        (setq dired-async--progress
+              (min (floor (/ (* (* speed (- (float-time)
+                                            dired-async-job-start-time))
+                                100)
+                             dired-async-total-size-to-transfer))
+                   100)))))
+    (force-mode-line-update))
+
+(defun dired-async-total-files-size (files &optional human)
+  (cl-loop for f in files
+           if (file-directory-p f)
+           sum (cl-loop for f in (helm-walk-directory
+                                  f
+                                  :path (lambda (f) (nth 7 (file-attributes f)))
+                                  :skip-subdirs t
+                                  :noerror t)
+                        sum f)
+           into res
+           else sum (nth 7 (file-attributes f)) into res
+           finally return (if human (helm-file-human-size res) res)))
+
 (define-minor-mode dired-async--modeline-mode
     "Notify mode-line that an async process run."
   :group 'dired-async
   :global t
-  :lighter (:eval (propertize (format " [%s Async job(s) running]"
-                                      (length (dired-async-processes)))
+  :lighter (:eval (propertize (format " [%s Async job(s) running %s％]"
+                                      (length (dired-async-processes))
+                                      dired-async--progress)
                               'face 'dired-async-mode-message))
   (unless dired-async--modeline-mode
     (let ((visible-bell t)) (ding))))
@@ -168,7 +209,10 @@ Should take same args as `message'."
                     "Asynchronous %s of %s on %s file%s done"
                     'dired-async-message
                     (car operation) (cadr operation)
-                    total (dired-plural-s total)))))))
+                    total (dired-plural-s total)))))
+    (cancel-timer dired-async-report-timer)
+    ;; (setq dired-async--progress 0)
+    ))
 
 (defun dired-async-maybe-kill-ftp ()
   "Return a form to kill ftp process in child emacs."
@@ -188,6 +232,11 @@ Should take same args as `message'."
 
 See `dired-create-files' for the behavior of arguments."
   (setq overwrite-query nil)
+  (setq dired-async-total-size-to-transfer
+        (dired-async-total-files-size fn-list)
+        dired-async-job-start-time (float-time)
+        dired-async--progress 0)
+  (setq dired-async-report-timer (run-with-timer 2 2 'dired-async-progress))
   (let ((total (length fn-list))
         failures async-fn-list skipped callback
         async-quiet-switch)
@@ -312,6 +361,11 @@ ESC or `q' to not overwrite any of the remaining files,
                                                (copy-file from to ok dired-copy-preserve-time)
                                              (file-date-error
                                               (dired-log "Can't set date on %s:\n%s\n" from err)))))))
+                            (advice-add 'copy-file :before (lambda (file newname &rest _)
+                                                             (with-temp-file ,dired-async-progress-file
+                                                               (erase-buffer)
+                                                               (insert (format "Fname: %s\n" newname)
+                                                                       (format "Itime: %s" (float-time))))))
                             ;; Now run the FILE-CREATOR function on files.
                             (cl-loop with fn = (quote ,file-creator)
                                      for (from . dest) in (quote ,async-fn-list)
