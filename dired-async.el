@@ -90,31 +90,37 @@ Should take same args as `message'."
   :group 'dired-async)
 
 (defvar dired-async-progress-file "/tmp/dired-async-progress.log")
-(defvar dired-async-job-start-time nil)
 (defvar dired-async-total-size-to-transfer nil)
-(defvar dired-async-report-timer nil)
 (defvar dired-async--progress 0)
+(defvar dired-async--current-amount-transfered 0)
+(defvar dired-async--last-checked-file-size 0)
+(defvar dired-async--file-in-transfer nil)
+(defvar dired-async-report-timer nil)
 (defun dired-async-progress ()
-  (let (start-time file speed)
+  (let (file size)
     (with-temp-buffer
       (insert-file-contents dired-async-progress-file)
-      (save-excursion
-        (when (re-search-forward "\\(Itime: \\)\\(.*\\)$" nil t)
-          (setq start-time (match-string 2))))
       (when (re-search-forward "\\(Fname: \\)\\(.*\\)$" nil t)
         (setq file (match-string 2))))
-    (when (and file start-time)
-      (let ((transfered-size (nth 7 (file-attributes file))))
-        (setq speed (/ transfered-size
-                       (- (float-time)
-                          (string-to-number start-time))))
+    (when file
+      (unless dired-async--file-in-transfer
+        (setq dired-async--file-in-transfer file))
+      (setq size (nth 7 (file-attributes file)))
+      (when size
+        (setq dired-async--current-amount-transfered
+              (+ dired-async--current-amount-transfered
+                 (if (string= file dired-async--file-in-transfer)
+                     (- size dired-async--last-checked-file-size)
+                   size)))
+        (setq dired-async--last-checked-file-size size)
+        (setq dired-async--file-in-transfer file)
         (setq dired-async--progress
-              (min (floor (/ (* (* speed (- (float-time)
-                                            dired-async-job-start-time))
-                                100)
-                             dired-async-total-size-to-transfer))
+              (min (floor
+                    ;; Total transfered
+                    (/ (* dired-async--current-amount-transfered 100)
+                       dired-async-total-size-to-transfer))
                    100)))))
-    (force-mode-line-update))
+  (force-mode-line-update))
 
 (defun dired-async-total-files-size (files &optional human)
   (cl-loop for f in files
@@ -234,9 +240,12 @@ See `dired-create-files' for the behavior of arguments."
   (setq overwrite-query nil)
   (setq dired-async-total-size-to-transfer
         (dired-async-total-files-size fn-list)
-        dired-async-job-start-time (float-time)
-        dired-async--progress 0)
-  (setq dired-async-report-timer (run-with-timer 2 2 'dired-async-progress))
+        dired-async--progress 0
+        dired-async--current-amount-transfered 0
+        dired-async--last-checked-file-size 0
+        dired-async--file-in-transfer nil
+        dired-async-report-timer
+        (run-with-timer 2 2 'dired-async-progress))
   (let ((total (length fn-list))
         failures async-fn-list skipped callback
         async-quiet-switch)
@@ -364,8 +373,7 @@ ESC or `q' to not overwrite any of the remaining files,
                             (advice-add 'copy-file :before (lambda (file newname &rest _)
                                                              (with-temp-file ,dired-async-progress-file
                                                                (erase-buffer)
-                                                               (insert (format "Fname: %s\n" newname)
-                                                                       (format "Itime: %s" (float-time))))))
+                                                               (insert (format "Fname: %s" newname)))))
                             ;; Now run the FILE-CREATOR function on files.
                             (cl-loop with fn = (quote ,file-creator)
                                      for (from . dest) in (quote ,async-fn-list)
