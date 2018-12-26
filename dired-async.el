@@ -89,45 +89,40 @@ Should take same args as `message'."
   "Face used for `dired-async--modeline-mode' lighter."
   :group 'dired-async)
 
+;;; Reporter
+;;
+;; TODO Make the reporter working with more than one job.
+
 (defvar dired-async-progress-file "~/.emacs.d/dired-async-progress.log")
 (defvar dired-async-total-size-to-transfer nil)
 (defvar dired-async--progress 0)
 (defvar dired-async--current-amount-transfered 0)
-(defvar dired-async--last-checked-file-size 0)
-(defvar dired-async--file-in-transfer nil)
 (defvar dired-async-report-timer nil)
 (defvar dired-async--transfer-speed nil)
 (defvar dired-async-job-start-time nil)
 (defun dired-async-progress ()
-  (let (file size speed)
+  (let (tsize speed)
     (with-temp-buffer
       (insert-file-contents dired-async-progress-file)
-      (unless (eq (point-min) (point-max))
-        (setq file (buffer-string))))
-    (if file
-        (progn
-          (unless dired-async--file-in-transfer
-            (setq dired-async--file-in-transfer file))
-          (when (setq size (nth 7 (file-attributes file)))
-            (setq dired-async--current-amount-transfered
-                  (+ dired-async--current-amount-transfered
-                     (if (string= file dired-async--file-in-transfer)
-                         (- size dired-async--last-checked-file-size)
-                       size)))
-            (setq speed (floor
-                         (/ dired-async--current-amount-transfered
-                            (- (float-time) dired-async-job-start-time))))
-            (setq dired-async--transfer-speed
-                  (format "%sb/s" (file-size-human-readable speed)))
-            (setq dired-async--last-checked-file-size size)
-            (setq dired-async--file-in-transfer file)
-            (setq dired-async--progress
-                  (min (floor
-                        ;; Total transfered
-                        (/ (* dired-async--current-amount-transfered 100)
-                           dired-async-total-size-to-transfer))
-                       100))))
-      (or dired-async--progress 0)))
+      (goto-char (point-min))
+      (setq tsize
+            ;; FIXME Probably it is faster to not use Fname: but a
+            ;; simple list of fnames and use while (not (eobp))
+            ;; [...] (forward-line 1) etc...
+            (cl-loop while (re-search-forward "^\\(Fname: \\)\\(.*\\)$" nil t)
+                     for size = (nth 7 (file-attributes (match-string 2)))
+                     when (numberp size) sum size)))
+    (when tsize
+      (setq speed (floor
+                   (/ tsize
+                      (- (float-time) dired-async-job-start-time))))
+      (setq dired-async--transfer-speed
+            (format "%sb/s" (file-size-human-readable speed)))
+      (setq dired-async--progress
+            (min (floor
+                  ;; Total transfered
+                  (/ (* tsize 100) dired-async-total-size-to-transfer))
+                 100))))
   (force-mode-line-update))
 
 (defun dired-async-total-files-size (files &optional human)
@@ -246,16 +241,16 @@ Should take same args as `message'."
 
 See `dired-create-files' for the behavior of arguments."
   (setq overwrite-query nil)
+  ;; Initialize variables for reporter
   (setq dired-async-total-size-to-transfer
         (dired-async-total-files-size fn-list)
         dired-async--progress 0
-        dired-async--current-amount-transfered 0
-        dired-async--last-checked-file-size 0
-        dired-async--file-in-transfer nil
         dired-async-report-timer
         (run-with-timer 2 2 'dired-async-progress)
         dired-async-job-start-time (float-time)
         dired-async--transfer-speed "0b/s")
+  (when (file-exists-p dired-async-progress-file)
+    (delete-file dired-async-progress-file))
   (let ((total (length fn-list))
         failures async-fn-list skipped callback
         async-quiet-switch)
@@ -381,9 +376,10 @@ ESC or `q' to not overwrite any of the remaining files,
                                              (file-date-error
                                               (dired-log "Can't set date on %s:\n%s\n" from err)))))))
                             (advice-add 'copy-file :before (lambda (_file newname &rest _)
-                                                             (with-temp-file ,dired-async-progress-file
-                                                               (erase-buffer)
-                                                               (insert newname))))
+                                                             (with-temp-buffer
+                                                               (insert (format "Fname: %s\n" newname))
+                                                               (write-region (point-min) (point-max)
+                                                                             ,dired-async-progress-file t))))
                             ;; Now run the FILE-CREATOR function on files.
                             (cl-loop with fn = (quote ,file-creator)
                                      for (from . dest) in (quote ,async-fn-list)
