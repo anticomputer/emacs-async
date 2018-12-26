@@ -96,8 +96,10 @@ Should take same args as `message'."
 (defvar dired-async--last-checked-file-size 0)
 (defvar dired-async--file-in-transfer nil)
 (defvar dired-async-report-timer nil)
+(defvar dired-async--transfer-speed nil)
+(defvar dired-async-job-start-time nil)
 (defun dired-async-progress ()
-  (let (file size)
+  (let (file size speed)
     (with-temp-buffer
       (insert-file-contents dired-async-progress-file)
       (unless (eq (point-min) (point-max))
@@ -112,6 +114,11 @@ Should take same args as `message'."
                      (if (string= file dired-async--file-in-transfer)
                          (- size dired-async--last-checked-file-size)
                        size)))
+            (setq speed (floor
+                         (/ dired-async--current-amount-transfered
+                            (- (float-time) dired-async-job-start-time))))
+            (setq dired-async--transfer-speed
+                  (format "%sb/s" (file-size-human-readable speed)))
             (setq dired-async--last-checked-file-size size)
             (setq dired-async--file-in-transfer file)
             (setq dired-async--progress
@@ -129,19 +136,19 @@ Should take same args as `message'."
            sum (cl-loop for f in (helm-walk-directory
                                   f
                                   :path (lambda (f) (nth 7 (file-attributes f)))
-                                  ;:skip-subdirs t
                                   :noerror t)
                         sum f)
            into res
            else sum (nth 7 (file-attributes f)) into res
-           finally return (if human (helm-file-human-size res) res)))
+           finally return (if human (file-size-human-readable res) res)))
 
 (define-minor-mode dired-async--modeline-mode
     "Notify mode-line that an async process run."
   :group 'dired-async
   :global t
-  :lighter (:eval (propertize (format " [%s Async job(s) running %s％]"
+  :lighter (:eval (propertize (format " [%s Async job(s) %s %s％]"
                                       (length (dired-async-processes))
+                                      dired-async--transfer-speed
                                       dired-async--progress)
                               'face 'dired-async-mode-message))
   (unless dired-async--modeline-mode
@@ -246,7 +253,9 @@ See `dired-create-files' for the behavior of arguments."
         dired-async--last-checked-file-size 0
         dired-async--file-in-transfer nil
         dired-async-report-timer
-        (run-with-timer 2 2 'dired-async-progress))
+        (run-with-timer 2 2 'dired-async-progress)
+        dired-async-job-start-time (float-time)
+        dired-async--transfer-speed "0b/s")
   (let ((total (length fn-list))
         failures async-fn-list skipped callback
         async-quiet-switch)
