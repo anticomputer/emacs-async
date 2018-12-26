@@ -89,7 +89,7 @@ Should take same args as `message'."
   "Face used for `dired-async--modeline-mode' lighter."
   :group 'dired-async)
 
-(defvar dired-async-progress-file "/tmp/dired-async-progress.log")
+(defvar dired-async-progress-file "~/.emacs.d/dired-async-progress.log")
 (defvar dired-async-total-size-to-transfer nil)
 (defvar dired-async--progress 0)
 (defvar dired-async--current-amount-transfered 0)
@@ -100,26 +100,27 @@ Should take same args as `message'."
   (let (file size)
     (with-temp-buffer
       (insert-file-contents dired-async-progress-file)
-      (when (re-search-forward "\\(Fname: \\)\\(.*\\)$" nil t)
-        (setq file (match-string 2))))
-    (when file
-      (unless dired-async--file-in-transfer
-        (setq dired-async--file-in-transfer file))
-      (setq size (nth 7 (file-attributes file)))
-      (when size
-        (setq dired-async--current-amount-transfered
-              (+ dired-async--current-amount-transfered
-                 (if (string= file dired-async--file-in-transfer)
-                     (- size dired-async--last-checked-file-size)
-                   size)))
-        (setq dired-async--last-checked-file-size size)
-        (setq dired-async--file-in-transfer file)
-        (setq dired-async--progress
-              (min (floor
-                    ;; Total transfered
-                    (/ (* dired-async--current-amount-transfered 100)
-                       dired-async-total-size-to-transfer))
-                   100)))))
+      (unless (eq (point-min) (point-max))
+        (setq file (buffer-string))))
+    (if file
+        (progn
+          (unless dired-async--file-in-transfer
+            (setq dired-async--file-in-transfer file))
+          (when (setq size (nth 7 (file-attributes file)))
+            (setq dired-async--current-amount-transfered
+                  (+ dired-async--current-amount-transfered
+                     (if (string= file dired-async--file-in-transfer)
+                         (- size dired-async--last-checked-file-size)
+                       size)))
+            (setq dired-async--last-checked-file-size size)
+            (setq dired-async--file-in-transfer file)
+            (setq dired-async--progress
+                  (min (floor
+                        ;; Total transfered
+                        (/ (* dired-async--current-amount-transfered 100)
+                           dired-async-total-size-to-transfer))
+                       100))))
+      (or dired-async--progress 0)))
   (force-mode-line-update))
 
 (defun dired-async-total-files-size (files &optional human)
@@ -128,7 +129,7 @@ Should take same args as `message'."
            sum (cl-loop for f in (helm-walk-directory
                                   f
                                   :path (lambda (f) (nth 7 (file-attributes f)))
-                                  :skip-subdirs t
+                                  ;:skip-subdirs t
                                   :noerror t)
                         sum f)
            into res
@@ -370,10 +371,10 @@ ESC or `q' to not overwrite any of the remaining files,
                                                (copy-file from to ok dired-copy-preserve-time)
                                              (file-date-error
                                               (dired-log "Can't set date on %s:\n%s\n" from err)))))))
-                            (advice-add 'copy-file :before (lambda (file newname &rest _)
+                            (advice-add 'copy-file :before (lambda (_file newname &rest _)
                                                              (with-temp-file ,dired-async-progress-file
                                                                (erase-buffer)
-                                                               (insert (format "Fname: %s" newname)))))
+                                                               (insert newname))))
                             ;; Now run the FILE-CREATOR function on files.
                             (cl-loop with fn = (quote ,file-creator)
                                      for (from . dest) in (quote ,async-fn-list)
