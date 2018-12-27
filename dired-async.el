@@ -361,7 +361,9 @@ ESC or `q' to not overwrite any of the remaining files,
                       ,(async-inject-variables dired-async-env-variables-regexp)
                           (let ((dired-recursive-copies (quote always))
                                 (dired-copy-preserve-time
-                                 ,dired-copy-preserve-time))
+                                 ,dired-copy-preserve-time)
+                                (dired-async-progress-file
+                                 ,dired-async-progress-file))
                             (setq overwrite-backup-query nil)
                             ;; Inline `backup-file' as long as it is not
                             ;; available in emacs.
@@ -382,11 +384,12 @@ ESC or `q' to not overwrite any of the remaining files,
                                                (copy-file from to ok dired-copy-preserve-time)
                                              (file-date-error
                                               (dired-log "Can't set date on %s:\n%s\n" from err)))))))
-                            (advice-add 'copy-file :before (lambda (_file newname &rest _)
-                                                             (with-temp-buffer
-                                                               (insert (format "Fname: %s\n" newname))
-                                                               (write-region (point-min) (point-max)
-                                                                             ,dired-async-progress-file t))))
+                            (advice-add 'copy-file
+                                        :before (lambda (_file newname &rest _)
+                                                  (with-temp-buffer
+                                                    (insert (format "Fname: %s\n" newname))
+                                                    (write-region (point-min) (point-max)
+                                                                  dired-async-progress-file t))))
                             ;; Now run the FILE-CREATOR function on files.
                             (cl-loop with fn = (quote ,file-creator)
                                      for (from . dest) in (quote ,async-fn-list)
