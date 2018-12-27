@@ -226,9 +226,7 @@ respectively.  Mode-line is updated when done."
                     'dired-async-message
                     (car operation) (cadr operation)
                     total (dired-plural-s total)))))
-    (cancel-timer dired-async--report-timer)
-    ;; (setq dired-async--progress 0)
-    ))
+    (cancel-timer dired-async--report-timer)))
 
 (defun dired-async-maybe-kill-ftp ()
   "Return a form to kill ftp process in child emacs."
@@ -253,7 +251,7 @@ See `dired-create-files' for the behavior of arguments."
         (dired-async-total-files-size fn-list)
         dired-async--progress 0
         dired-async--report-timer
-        (run-with-timer 0.5 0.5 'dired-async-progress)
+        (run-with-timer 0.5 2 'dired-async-progress)
         dired-async--job-start-time (float-time)
         dired-async--transfer-speed "0b/s"
         dired-async--current-amount-transfered 0)
