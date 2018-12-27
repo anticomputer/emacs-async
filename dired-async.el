@@ -111,28 +111,23 @@ respectively.  Mode-line is updated when done."
   (let (tsize speed)
     (with-temp-buffer
       (insert-file-contents dired-async-progress-file)
-      (goto-char (or dired-async--progress-index (point-min)))
+      (goto-char (point-min))
       (setq tsize
             ;; FIXME Probably it is faster to not use Fname: but a
             ;; simple list of fnames and use while (not (eobp))
             ;; [...] (forward-line 1) etc...
             (cl-loop while (re-search-forward "^\\(Fname: \\)\\(.*\\)$" nil t)
                      for size = (nth 7 (file-attributes (match-string 2)))
-                     when (numberp size) sum size)
-            dired-async--progress-index (point)))
+                     when (numberp size) sum size)))
     (when tsize
-      (setq dired-async--current-amount-transfered
-            (+ dired-async--current-amount-transfered tsize))
       (setq speed (floor
-                   (/ dired-async--current-amount-transfered
-                      (- (float-time) dired-async--job-start-time))))
+                   (/ tsize (- (float-time) dired-async--job-start-time))))
       (setq dired-async--transfer-speed
             (format "%sb/s" (file-size-human-readable speed)))
       (setq dired-async--progress
             (min (floor
                   ;; Total transfered
-                  (/ (* dired-async--current-amount-transfered 100)
-                     dired-async--total-size-to-transfer))
+                  (/ (* tsize 100) dired-async--total-size-to-transfer))
                  100))))
   (force-mode-line-update))
 
@@ -261,7 +256,6 @@ See `dired-create-files' for the behavior of arguments."
         (run-with-timer 0.5 0.5 'dired-async-progress)
         dired-async--job-start-time (float-time)
         dired-async--transfer-speed "0b/s"
-        dired-async--progress-index nil
         dired-async--current-amount-transfered 0)
   (when (file-exists-p dired-async-progress-file)
     (delete-file dired-async-progress-file))
