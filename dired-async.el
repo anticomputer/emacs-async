@@ -103,6 +103,11 @@ Should take same args as `message'."
 (defvar dired-async--progress-index nil)
 (defvar dired-async--current-amount-transfered 0)
 (defun dired-async-progress ()
+  "Progress reporter for file operations.
+Calculate percentage and speed of files transfer while
+copying/renaming files.  Store speed and percentage in
+`dired-async--transfer-speed' and `dired-async--progress'
+respectively.  Mode-line is updated when done."
   (let (tsize speed)
     (with-temp-buffer
       (insert-file-contents dired-async-progress-file)
@@ -132,6 +137,7 @@ Should take same args as `message'."
   (force-mode-line-update))
 
 (defun dired-async-total-files-size (files &optional human)
+  "Summarize disk usage of the set of FILES."
   (cl-loop for f in files
            if (file-directory-p f)
            sum (cl-loop for f in (helm-walk-directory
