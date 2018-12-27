@@ -93,7 +93,7 @@ Should take same args as `message'."
 ;;
 ;; TODO Make the reporter working with more than one job.
 
-(defvar dired-async-progress-file "~/.emacs.d/dired-async-progress.log")
+(defvar dired-async-progress-file "/tmp/dired-async-progress.log")
 (defvar dired-async--total-size-to-transfer nil)
 (defvar dired-async--progress 0)
 (defvar dired-async--current-amount-transfered 0)
@@ -109,26 +109,27 @@ copying/renaming files.  Store speed and percentage in
 `dired-async--transfer-speed' and `dired-async--progress'
 respectively.  Mode-line is updated when done."
   (let (tsize speed)
-    (with-temp-buffer
-      (insert-file-contents dired-async-progress-file)
-      (goto-char (point-min))
-      (setq tsize
-            ;; FIXME Probably it is faster to not use Fname: but a
-            ;; simple list of fnames and use while (not (eobp))
-            ;; [...] (forward-line 1) etc...
-            (cl-loop while (re-search-forward "^\\(Fname: \\)\\(.*\\)$" nil t)
-                     for size = (nth 7 (file-attributes (match-string 2)))
-                     when (numberp size) sum size)))
-    (when tsize
-      (setq speed (floor
-                   (/ tsize (- (float-time) dired-async--job-start-time))))
-      (setq dired-async--transfer-speed
-            (format "%sb/s" (file-size-human-readable speed)))
-      (setq dired-async--progress
-            (min (floor
-                  ;; Total transfered
-                  (/ (* tsize 100) dired-async--total-size-to-transfer))
-                 100))))
+    (when (file-exists-p dired-async-progress-file)
+      (with-temp-buffer
+        (insert-file-contents dired-async-progress-file)
+        (goto-char (point-min))
+        (setq tsize
+              ;; FIXME Probably it is faster to not use Fname: but a
+              ;; simple list of fnames and use while (not (eobp))
+              ;; [...] (forward-line 1) etc...
+              (cl-loop while (re-search-forward "^\\(Fname: \\)\\(.*\\)$" nil t)
+                       for size = (nth 7 (file-attributes (match-string 2)))
+                       when (numberp size) sum size)))
+      (when tsize
+        (setq speed (floor
+                     (/ tsize (- (float-time) dired-async--job-start-time))))
+        (setq dired-async--transfer-speed
+              (format "%sb/s" (file-size-human-readable speed)))
+        (setq dired-async--progress
+              (min (floor
+                    ;; Total transfered
+                    (/ (* tsize 100) dired-async--total-size-to-transfer))
+                   100)))))
   (force-mode-line-update))
 
 (defun dired-async-total-files-size (files &optional human)
