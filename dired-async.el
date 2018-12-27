@@ -94,34 +94,40 @@ Should take same args as `message'."
 ;; TODO Make the reporter working with more than one job.
 
 (defvar dired-async-progress-file "~/.emacs.d/dired-async-progress.log")
-(defvar dired-async-total-size-to-transfer nil)
+(defvar dired-async--total-size-to-transfer nil)
 (defvar dired-async--progress 0)
 (defvar dired-async--current-amount-transfered 0)
-(defvar dired-async-report-timer nil)
+(defvar dired-async--report-timer nil)
 (defvar dired-async--transfer-speed nil)
-(defvar dired-async-job-start-time nil)
+(defvar dired-async--job-start-time nil)
+(defvar dired-async--progress-index nil)
+(defvar dired-async--current-amount-transfered 0)
 (defun dired-async-progress ()
   (let (tsize speed)
     (with-temp-buffer
       (insert-file-contents dired-async-progress-file)
-      (goto-char (point-min))
+      (goto-char (or dired-async--progress-index (point-min)))
       (setq tsize
             ;; FIXME Probably it is faster to not use Fname: but a
             ;; simple list of fnames and use while (not (eobp))
             ;; [...] (forward-line 1) etc...
             (cl-loop while (re-search-forward "^\\(Fname: \\)\\(.*\\)$" nil t)
                      for size = (nth 7 (file-attributes (match-string 2)))
-                     when (numberp size) sum size)))
+                     when (numberp size) sum size)
+            dired-async--progress-index (point)))
     (when tsize
+      (setq dired-async--current-amount-transfered
+            (+ dired-async--current-amount-transfered tsize))
       (setq speed (floor
-                   (/ tsize
-                      (- (float-time) dired-async-job-start-time))))
+                   (/ dired-async--current-amount-transfered
+                      (- (float-time) dired-async--job-start-time))))
       (setq dired-async--transfer-speed
             (format "%sb/s" (file-size-human-readable speed)))
       (setq dired-async--progress
             (min (floor
                   ;; Total transfered
-                  (/ (* tsize 100) dired-async-total-size-to-transfer))
+                  (/ (* dired-async--current-amount-transfered 100)
+                     dired-async--total-size-to-transfer))
                  100))))
   (force-mode-line-update))
 
@@ -219,7 +225,7 @@ Should take same args as `message'."
                     'dired-async-message
                     (car operation) (cadr operation)
                     total (dired-plural-s total)))))
-    (cancel-timer dired-async-report-timer)
+    (cancel-timer dired-async--report-timer)
     ;; (setq dired-async--progress 0)
     ))
 
@@ -242,13 +248,15 @@ Should take same args as `message'."
 See `dired-create-files' for the behavior of arguments."
   (setq overwrite-query nil)
   ;; Initialize variables for reporter
-  (setq dired-async-total-size-to-transfer
+  (setq dired-async--total-size-to-transfer
         (dired-async-total-files-size fn-list)
         dired-async--progress 0
-        dired-async-report-timer
-        (run-with-timer 2 2 'dired-async-progress)
-        dired-async-job-start-time (float-time)
-        dired-async--transfer-speed "0b/s")
+        dired-async--report-timer
+        (run-with-timer 0.5 0.5 'dired-async-progress)
+        dired-async--job-start-time (float-time)
+        dired-async--transfer-speed "0b/s"
+        dired-async--progress-index nil
+        dired-async--current-amount-transfered 0)
   (when (file-exists-p dired-async-progress-file)
     (delete-file dired-async-progress-file))
   (let ((total (length fn-list))
