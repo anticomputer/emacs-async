@@ -96,12 +96,9 @@ Should take same args as `message'."
 (defvar dired-async-progress-file "/tmp/dired-async-progress.log")
 (defvar dired-async--total-size-to-transfer nil)
 (defvar dired-async--progress 0)
-(defvar dired-async--current-amount-transfered 0)
 (defvar dired-async--report-timer nil)
 (defvar dired-async--transfer-speed nil)
 (defvar dired-async--job-start-time nil)
-(defvar dired-async--progress-index nil)
-(defvar dired-async--current-amount-transfered 0)
 (defun dired-async-progress ()
   "Progress reporter for file operations.
 Calculate percentage and speed of files transfer while
@@ -251,8 +248,7 @@ See `dired-create-files' for the behavior of arguments."
         dired-async--report-timer
         (run-with-timer 0.5 2 'dired-async-progress)
         dired-async--job-start-time (float-time)
-        dired-async--transfer-speed "0b/s"
-        dired-async--current-amount-transfered 0)
+        dired-async--transfer-speed "0b/s")
   (when (file-exists-p dired-async-progress-file)
     (delete-file dired-async-progress-file))
   (let ((total (length fn-list))
