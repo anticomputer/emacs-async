@@ -114,9 +114,6 @@ respectively.  Mode-line is updated when done."
         (insert-file-contents dired-async-progress-file)
         (goto-char (point-min))
         (setq tsize
-              ;; FIXME Probably it is faster to not use Fname: but a
-              ;; simple list of fnames and use while (not (eobp))
-              ;; [...] (forward-line 1) etc...
               (cl-loop while (re-search-forward "^\\(Fname: \\)\\(.*\\)$" nil t)
                        for size = (nth 7 (file-attributes (match-string 2)))
                        when (numberp size) sum size)))
