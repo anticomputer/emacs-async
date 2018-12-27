@@ -74,6 +74,11 @@ Should take same args as `message'."
   :risky t
   :type 'sexp)
 
+(defcustom dired-async-use-reporter t
+  "Provide a progress reporter when non nil."
+  :group 'dired-async
+  :type 'boolean)
+
 (defface dired-async-message
     '((t (:foreground "yellow")))
   "Face used for mode-line message."
@@ -145,15 +150,19 @@ respectively.  Mode-line is updated when done."
     "Notify mode-line that an async process run."
   :group 'dired-async
   :global t
-  :lighter (:eval (propertize (format " [%s Async job(s) %s/%s %s %s％]"
-                                      (length (dired-async-processes))
-                                      (file-size-human-readable
-                                       dired-async--current-amount-transfered)
-                                      (file-size-human-readable
-                                       dired-async--total-size-to-transfer)
-                                      dired-async--transfer-speed
-                                      dired-async--progress)
-                              'face 'dired-async-mode-message))
+  :lighter (:eval (if dired-async-use-reporter
+                      (propertize (format " [%s Async job(s) %s/%s %s %s％]"
+                                          (length (dired-async-processes))
+                                          (file-size-human-readable
+                                           dired-async--current-amount-transfered)
+                                          (file-size-human-readable
+                                           dired-async--total-size-to-transfer)
+                                          dired-async--transfer-speed
+                                          dired-async--progress)
+                                  'face 'dired-async-mode-message)
+                    (propertize (format " [%s Async job(s) running]"
+                                        (length (dired-async-processes)))
+                                'face 'dired-async-mode-message)))
   (unless dired-async--modeline-mode
     (let ((visible-bell t)) (ding))))
 
@@ -227,7 +236,8 @@ respectively.  Mode-line is updated when done."
                     'dired-async-message
                     (car operation) (cadr operation)
                     total (dired-plural-s total)))))
-    (cancel-timer dired-async--report-timer)))
+    (when dired-async--report-timer
+      (cancel-timer dired-async--report-timer))))
 
 (defun dired-async-maybe-kill-ftp ()
   "Return a form to kill ftp process in child emacs."
@@ -248,16 +258,17 @@ respectively.  Mode-line is updated when done."
 See `dired-create-files' for the behavior of arguments."
   (setq overwrite-query nil)
   ;; Initialize variables for reporter
-  (setq dired-async--total-size-to-transfer
-        (dired-async-total-files-size fn-list)
-        dired-async--progress 0
-        dired-async--report-timer
-        (run-with-timer 0.5 2 'dired-async-progress)
-        dired-async--job-start-time (float-time)
-        dired-async--transfer-speed "0b/s"
-        dired-async--current-amount-transfered 0)
-  (when (file-exists-p dired-async-progress-file)
-    (delete-file dired-async-progress-file))
+  (when dired-async-use-reporter
+    (setq dired-async--total-size-to-transfer
+          (dired-async-total-files-size fn-list)
+          dired-async--progress 0
+          dired-async--report-timer
+          (run-with-timer 0.5 2 'dired-async-progress)
+          dired-async--job-start-time (float-time)
+          dired-async--transfer-speed "0b/s"
+          dired-async--current-amount-transfered 0)
+    (when (file-exists-p dired-async-progress-file)
+      (delete-file dired-async-progress-file)))
   (let ((total (length fn-list))
         failures async-fn-list skipped callback
         async-quiet-switch)
@@ -384,12 +395,13 @@ ESC or `q' to not overwrite any of the remaining files,
                                                (copy-file from to ok dired-copy-preserve-time)
                                              (file-date-error
                                               (dired-log "Can't set date on %s:\n%s\n" from err)))))))
-                            (advice-add 'copy-file
-                                        :before (lambda (_file newname &rest _)
-                                                  (with-temp-buffer
-                                                    (insert (format "Fname: %s\n" newname))
-                                                    (write-region (point-min) (point-max)
-                                                                  dired-async-progress-file t))))
+                            (when ,dired-async-use-reporter
+                              (advice-add 'copy-file
+                                          :before (lambda (_file newname &rest _)
+                                                    (with-temp-buffer
+                                                      (insert (format "Fname: %s\n" newname))
+                                                      (write-region (point-min) (point-max)
+                                                                    dired-async-progress-file t)))))
                             ;; Now run the FILE-CREATOR function on files.
                             (cl-loop with fn = (quote ,file-creator)
                                      for (from . dest) in (quote ,async-fn-list)
