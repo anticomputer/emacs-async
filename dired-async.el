@@ -99,6 +99,7 @@ Should take same args as `message'."
 (defvar dired-async--report-timer nil)
 (defvar dired-async--transfer-speed nil)
 (defvar dired-async--job-start-time nil)
+(defvar dired-async--current-amount-transfered 0)
 (defun dired-async-progress ()
   "Progress reporter for file operations.
 Calculate percentage and speed of files transfer while
@@ -115,6 +116,7 @@ respectively.  Mode-line is updated when done."
                        for size = (nth 7 (file-attributes (match-string 2)))
                        when (numberp size) sum size)))
       (when tsize
+        (setq dired-async--current-amount-transfered tsize)
         (setq speed (floor
                      (/ tsize (- (float-time) dired-async--job-start-time))))
         (setq dired-async--transfer-speed
@@ -143,8 +145,12 @@ respectively.  Mode-line is updated when done."
     "Notify mode-line that an async process run."
   :group 'dired-async
   :global t
-  :lighter (:eval (propertize (format " [%s Async job(s) %s %s％]"
+  :lighter (:eval (propertize (format " [%s Async job(s) %s/%s %s %s％]"
                                       (length (dired-async-processes))
+                                      (file-size-human-readable
+                                       dired-async--current-amount-transfered)
+                                      (file-size-human-readable
+                                       dired-async--total-size-to-transfer)
                                       dired-async--transfer-speed
                                       dired-async--progress)
                               'face 'dired-async-mode-message))
@@ -248,7 +254,8 @@ See `dired-create-files' for the behavior of arguments."
         dired-async--report-timer
         (run-with-timer 0.5 2 'dired-async-progress)
         dired-async--job-start-time (float-time)
-        dired-async--transfer-speed "0b/s")
+        dired-async--transfer-speed "0b/s"
+        dired-async--current-amount-transfered 0)
   (when (file-exists-p dired-async-progress-file)
     (delete-file dired-async-progress-file))
   (let ((total (length fn-list))
