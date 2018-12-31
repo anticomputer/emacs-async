@@ -111,16 +111,18 @@ and the cdr the dest files."
            for file in files
            for attrs = (file-attributes file)
            if (eq t (nth 0 attrs)) ; file-directory-p
-           sum (cl-loop for f in (helm-walk-directory
-                                  file
-                                  :path 'full
-                                  :noerror t)
+           sum (cl-loop for f in (directory-files-recursively file "" t)
                         do (push (expand-file-name (file-relative-name f file)
-                                                   (expand-file-name (helm-basename file) dest))
+                                                   (expand-file-name
+                                                    (file-name-nondirectory
+                                                     (directory-file-name file))
+                                                    dest))
                                  flst)
                         and sum (nth 7 (file-attributes f)))
            into res
-           else do (push (expand-file-name (helm-basename file) dest) flst)
+           else do (push (expand-file-name
+                          (file-name-nondirectory file) dest)
+                         flst)
            and sum (nth 7 attrs) into res
            finally return
            (cons (if human
