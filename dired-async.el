@@ -97,54 +97,63 @@ Should take same args as `message'."
 ;;; Reporter
 ;;
 ;; TODO Make the reporter working with more than one job.
-
-(defvar dired-async-progress-file "/tmp/dired-async-progress.log")
-(defvar dired-async--total-size-to-transfer nil)
+(defvar dired-async--all-data nil)
+(defvar dired-async--current-amount-transfered 0)
+(defvar dired-async--job-start-time nil)
+(defvar dired-async--total-size-to-transfer 0)
 (defvar dired-async--progress 0)
 (defvar dired-async--report-timer nil)
 (defvar dired-async--transfer-speed nil)
-(defvar dired-async--job-start-time nil)
-(defvar dired-async--current-amount-transfered 0)
+(defun dired-async-all-data (files dest &optional human)
+  "Returns a list where the car is the size of all data to transfer
+and the cdr the dest files."
+  (cl-loop with flst
+           for file in files
+           for attrs = (file-attributes file)
+           if (eq t (nth 0 attrs)) ; file-directory-p
+           sum (cl-loop for f in (helm-walk-directory
+                                  file
+                                  :path 'full
+                                  :noerror t)
+                        do (push (expand-file-name (file-relative-name f file)
+                                                   (expand-file-name (helm-basename file) dest))
+                                 flst)
+                        and sum (nth 7 (file-attributes f)))
+           into res
+           else do (push (expand-file-name (helm-basename file) dest) flst)
+           and sum (nth 7 attrs) into res
+           finally return
+           (cons (if human
+                     (file-size-human-readable res)
+                   res)
+                 (nreverse flst))))
+
 (defun dired-async-progress ()
   "Progress reporter for file operations.
 Calculate percentage and speed of files transfer while
 copying/renaming files.  Store speed and percentage in
 `dired-async--transfer-speed' and `dired-async--progress'
 respectively.  Mode-line is updated when done."
-  (let (tsize speed)
-    (when (file-exists-p dired-async-progress-file)
-      (with-temp-buffer
-        (insert-file-contents dired-async-progress-file)
-        (goto-char (point-min))
-        (setq tsize
-              (cl-loop while (re-search-forward "^\\(Fname: \\)\\(.*\\)$" nil t)
-                       for size = (nth 7 (file-attributes (match-string 2)))
-                       when (numberp size) sum size)))
-      (when tsize
-        (setq dired-async--current-amount-transfered tsize)
-        (setq speed (floor
-                     (/ tsize (- (float-time) dired-async--job-start-time))))
-        (setq dired-async--transfer-speed
-              (format "%sb/s" (file-size-human-readable speed)))
-        (setq dired-async--progress
-              (min (floor
-                    ;; Total transfered
-                    (/ (* tsize 100) dired-async--total-size-to-transfer))
-                   100)))))
+  (let ((dests (cdr dired-async--all-data))
+        tsize-transfered speed)
+    (setq tsize-transfered
+          (cl-loop for f in dests
+                   when (nth 7 (file-attributes f))
+                   sum it))
+    (when tsize-transfered
+      (setq dired-async--current-amount-transfered tsize-transfered)
+      (setq speed (floor
+                   (/ tsize-transfered
+                      (- (float-time) dired-async--job-start-time))))
+      (setq dired-async--transfer-speed
+            (format "%sb/s" (file-size-human-readable speed)))
+      (setq dired-async--progress
+            (min (floor
+                  ;; Total transfered
+                  (/ (* tsize-transfered 100)
+                     dired-async--total-size-to-transfer))
+                 100))))
   (force-mode-line-update))
-
-(defun dired-async-total-files-size (files &optional human)
-  "Summarize disk usage of the set of FILES."
-  (cl-loop for f in files
-           if (file-directory-p f)
-           sum (cl-loop for f in (helm-walk-directory
-                                  f
-                                  :path (lambda (f) (nth 7 (file-attributes f)))
-                                  :noerror t)
-                        sum f)
-           into res
-           else sum (nth 7 (file-attributes f)) into res
-           finally return (if human (file-size-human-readable res) res)))
 
 (define-minor-mode dired-async--modeline-mode
     "Notify mode-line that an async process run."
@@ -257,18 +266,6 @@ respectively.  Mode-line is updated when done."
 
 See `dired-create-files' for the behavior of arguments."
   (setq overwrite-query nil)
-  ;; Initialize variables for reporter
-  (when dired-async-use-reporter
-    (setq dired-async--total-size-to-transfer
-          (dired-async-total-files-size fn-list)
-          dired-async--progress 0
-          dired-async--report-timer
-          (run-with-timer 0.5 2 'dired-async-progress)
-          dired-async--job-start-time (float-time)
-          dired-async--transfer-speed "0b/s"
-          dired-async--current-amount-transfered 0)
-    (when (file-exists-p dired-async-progress-file)
-      (delete-file dired-async-progress-file)))
   (let ((total (length fn-list))
         failures async-fn-list skipped callback
         async-quiet-switch)
@@ -327,6 +324,19 @@ ESC or `q' to not overwrite any of the remaining files,
                         (dired-log "%s `%s' to `%s' failed\n"
                                    operation from to)))
                   (push (cons from to) async-fn-list)))))
+      ;; Initialize variables for reporter
+      (when dired-async-use-reporter
+        (setq dired-async--all-data (dired-async-all-data
+                                     fn-list
+                                     (file-name-directory
+                                      (cdar async-fn-list)))
+              dired-async--total-size-to-transfer (car dired-async--all-data)
+              dired-async--job-start-time (float-time)
+              dired-async--current-amount-transfered 0
+              dired-async--progress 0
+              dired-async--report-timer
+              (run-with-timer 0.5 1 'dired-async-progress)
+              dired-async--transfer-speed "0b/s"))
       ;; Fix tramp issue #80 with emacs-26, use "-q" only when needed.
       (setq async-quiet-switch
             (if (and (boundp 'tramp-cache-read-persistent-data)
@@ -395,13 +405,6 @@ ESC or `q' to not overwrite any of the remaining files,
                                                (copy-file from to ok dired-copy-preserve-time)
                                              (file-date-error
                                               (dired-log "Can't set date on %s:\n%s\n" from err)))))))
-                            (when ,dired-async-use-reporter
-                              (advice-add 'copy-file
-                                          :before (lambda (_file newname &rest _)
-                                                    (with-temp-buffer
-                                                      (insert (format "Fname: %s\n" newname))
-                                                      (write-region (point-min) (point-max)
-                                                                    dired-async-progress-file t)))))
                             ;; Now run the FILE-CREATOR function on files.
                             (cl-loop with fn = (quote ,file-creator)
                                      for (from . dest) in (quote ,async-fn-list)
