@@ -384,9 +384,7 @@ ESC or `q' to not overwrite any of the remaining files,
                       ,(async-inject-variables dired-async-env-variables-regexp)
                           (let ((dired-recursive-copies (quote always))
                                 (dired-copy-preserve-time
-                                 ,dired-copy-preserve-time)
-                                (dired-async-progress-file
-                                 ,dired-async-progress-file))
+                                 ,dired-copy-preserve-time))
                             (setq overwrite-backup-query nil)
                             ;; Inline `backup-file' as long as it is not
                             ;; available in emacs.
