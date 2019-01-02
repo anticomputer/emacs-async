@@ -326,19 +326,6 @@ ESC or `q' to not overwrite any of the remaining files,
                         (dired-log "%s `%s' to `%s' failed\n"
                                    operation from to)))
                   (push (cons from to) async-fn-list)))))
-      ;; Initialize variables for reporter
-      (when dired-async-use-reporter
-        (setq dired-async--all-data (dired-async-all-data
-                                     fn-list
-                                     (file-name-directory
-                                      (cdar async-fn-list)))
-              dired-async--total-size-to-transfer (car dired-async--all-data)
-              dired-async--job-start-time (float-time)
-              dired-async--current-amount-transfered 0
-              dired-async--progress 0
-              dired-async--report-timer
-              (run-with-timer 0.5 1 'dired-async-progress)
-              dired-async--transfer-speed "0b/s"))
       ;; Fix tramp issue #80 with emacs-26, use "-q" only when needed.
       (setq async-quiet-switch
             (if (and (boundp 'tramp-cache-read-persistent-data)
@@ -377,6 +364,27 @@ ESC or `q' to not overwrite any of the remaining files,
                           do (and bf destp
                                   (with-current-buffer bf
                                     (set-visited-file-name to t t))))))))
+          ;; Initialize variables for reporter
+    (when dired-async-use-reporter
+      (async-start `(lambda ()
+                      ,(async-inject-variables "\\`load-path\\'")
+                      (require 'dired-async)
+                      (dired-async-all-data
+                       ',fn-list
+                       ,(file-name-directory
+                         (cdar async-fn-list))))
+                   (lambda (result)
+                     (setq dired-async--all-data result
+                           dired-async--total-size-to-transfer (car dired-async--all-data)
+                           dired-async--report-timer
+                           (run-with-timer
+                            0.5 1 (lambda ()
+                                    (make-thread 'dired-async-progress))))))
+      (setq dired-async--transfer-speed "0b/s"
+            dired-async--progress 0
+            dired-async--current-amount-transfered 0
+            dired-async--job-start-time (float-time)
+            dired-async--total-size-to-transfer 0))
     ;; Start async process.
     (when async-fn-list
       (async-start `(lambda ()
